@@ -8,7 +8,7 @@ import (
 	"html/template"
 	"log"
 	"net/http"
-	"os"
+	//"os"
 )
 
 type Context struct {
@@ -20,6 +20,16 @@ func NewContext(db *sql.DB, store *sessions.CookieStore) *Context {
 	return &Context{db, store}
 }
 
+type User struct {
+	username string
+	password string
+	email    string
+}
+
+func NewUser(username, password, email string) *User {
+	return &User{username, password, email}
+}
+
 func rootHandler(w http.ResponseWriter, r *http.Request, c *Context) {
 	session, err := c.store.Get(r, "session-name")
 	if err != nil {
@@ -27,18 +37,32 @@ func rootHandler(w http.ResponseWriter, r *http.Request, c *Context) {
 	} else if user, set := session.Values["user"]; set {
 		fmt.Fprintf(w, "<h1>Welcome, %v</h1>", user)
 	} else {
-		renderTemplate(w, "login.html")
+		fmt.Fprintf(w, "Register over <a href=\"localhost:8080/register\">here</a><br>")
+		fmt.Fprintf(w, "Login over <a href=\"localhost:8080/login\">here</a>")
 	}
 }
 
 func registerHandler(w http.ResponseWriter, r *http.Request, c *Context) {
-	user := r.FormValue("user")
-	pass := r.FormValue("pass")
-
-	register(w, r, c, user, pass)
+	renderTemplate(w, "register.html")
 }
 
 func loginHandler(w http.ResponseWriter, r *http.Request, c *Context) {
+	renderTemplate(w, "login.html")
+}
+
+func doregisterHandler(w http.ResponseWriter, r *http.Request, c *Context) {
+	// Create a the user from the submitted form
+	u := &User{r.FormValue("user"), r.FormValue("pass"), r.FormValue("email")}
+
+	// Register the user
+	if register(w, r, c, u) {
+		fmt.Fprintf(w, "Successfully registered!")
+	} else {
+		fmt.Fprintf(w, "Couldn't register you.")
+	}
+}
+
+func dologinHandler(w http.ResponseWriter, r *http.Request, c *Context) {
 	user := r.FormValue("user")
 	pass := r.FormValue("pass")
 
@@ -56,25 +80,26 @@ func makeHandler(c *Context, fn func(http.ResponseWriter, *http.Request, *Contex
 }
 
 func main() {
-	os.Remove("./foo.db")
+	//os.Remove("./foo.db")
 
 	db, err := sql.Open("sqlite3", "./foo.db")
+	defer db.Close()
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer db.Close()
 
 	c := NewContext(db, sessions.NewCookieStore([]byte("something-very-secret")))
 
-	_, err = c.db.Query("create table users(username text primary key, password text)")
+	/*_, err = c.db.Exec("create table users(username text primary key, password text, email text)")
 	if err != nil {
 		log.Fatal(err)
-		return
-	}
+	}*/
 
 	http.HandleFunc("/", makeHandler(c, rootHandler))
 	http.HandleFunc("/register", makeHandler(c, registerHandler))
 	http.HandleFunc("/login", makeHandler(c, loginHandler))
+	http.HandleFunc("/doregister", makeHandler(c, doregisterHandler))
+	http.HandleFunc("/dologin", makeHandler(c, dologinHandler))
 
 	fmt.Println("Serving webserver...")
 	err = http.ListenAndServe(":8080", nil)
@@ -95,8 +120,14 @@ func renderTemplate(w http.ResponseWriter, tmpl string) {
 	}
 }
 
-func register(w http.ResponseWriter, r *http.Request, c *Context, user, pass string) bool {
-	_, err := c.db.Exec("insert into users values(?, ?)", user, pass)
+func register(w http.ResponseWriter, r *http.Request, c *Context, u *User) bool {
+	tx, err := c.db.Begin()
+	defer tx.Commit()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	_, err = tx.Exec("insert into users values(?, ?, ?)", u.username, u.password, u.email)
 	if err != nil {
 		log.Fatal(err)
 		return false
@@ -106,7 +137,7 @@ func register(w http.ResponseWriter, r *http.Request, c *Context, user, pass str
 }
 
 func login(w http.ResponseWriter, r *http.Request, c *Context, user, pass string) bool {
-	rows, err := c.db.Query("select * from users where username=?", user)
+	rows, err := c.db.Query("select username, password from users where username=?", user)
 	defer rows.Close()
 	if err != nil {
 		log.Fatal(err)
@@ -114,7 +145,9 @@ func login(w http.ResponseWriter, r *http.Request, c *Context, user, pass string
 	}
 	for rows.Next() {
 		var realUser, realPass string
-		rows.Scan(&realUser, &realPass)
+		if err := rows.Scan(&realUser, &realPass); err != nil {
+			log.Fatal(err)
+		}
 
 		if realUser == user && realPass == pass {
 			// Get a session. We're ignoring the error resulted from decoding an
