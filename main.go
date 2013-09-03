@@ -37,8 +37,7 @@ func rootHandler(w http.ResponseWriter, r *http.Request, c *Context) {
 	} else if user, set := session.Values["user"]; set {
 		fmt.Fprintf(w, "<h1>Welcome, %v</h1>", user)
 	} else {
-		fmt.Fprintf(w, "Register over <a href=\"localhost:8080/register\">here</a><br>")
-		fmt.Fprintf(w, "Login over <a href=\"localhost:8080/login\">here</a>")
+		renderTemplate(w, "index.html")
 	}
 }
 
@@ -150,12 +149,8 @@ func login(w http.ResponseWriter, r *http.Request, c *Context, user, pass string
 		}
 
 		if realUser == user && realPass == pass {
-			// Get a session. We're ignoring the error resulted from decoding an
-			// existing session: Get() always returns a session, even if empty.
-			session, _ := c.store.Get(r, "session-name")
-			// Set some session values.
+			session, _ := c.store.Get(r, "gositetest-session")
 			session.Values["user"] = user
-			// Save it.
 			session.Save(r, w)
 
 			return true
@@ -163,4 +158,10 @@ func login(w http.ResponseWriter, r *http.Request, c *Context, user, pass string
 	}
 
 	return false
+}
+
+func logout(w http.ResponseWriter, r *http.Request, c *Context, user string) {
+	session, _ := c.store.Get(r, "gositetest-session")
+	session.Values["user"] = user
+	session.Save(r, w)
 }
