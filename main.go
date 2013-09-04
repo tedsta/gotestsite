@@ -8,7 +8,7 @@ import (
 	"html/template"
 	"log"
 	"net/http"
-	//"os"
+	"os"
 )
 
 type Context struct {
@@ -31,11 +31,12 @@ func NewUser(username, password, email string) *User {
 }
 
 func rootHandler(w http.ResponseWriter, r *http.Request, c *Context) {
-	session, err := c.store.Get(r, "session-name")
+	session, err := c.store.Get(r, "gositetest-session")
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	} else if user, set := session.Values["user"]; set {
-		fmt.Fprintf(w, "<h1>Welcome, %v</h1>", user)
+		fmt.Fprintf(w, "<h1>Welcome, %v</h1><br>", user)
+		fmt.Fprintf(w, "<a href=\"/dologout\">Logout</a>")
 	} else {
 		renderTemplate(w, "index.html")
 	}
@@ -72,6 +73,11 @@ func dologinHandler(w http.ResponseWriter, r *http.Request, c *Context) {
 	}
 }
 
+func dologoutHandler(w http.ResponseWriter, r *http.Request, c *Context) {
+	logout(w)
+	fmt.Fprintf(w, "Successfully logged out!")
+}
+
 func makeHandler(c *Context, fn func(http.ResponseWriter, *http.Request, *Context)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		fn(w, r, c)
@@ -79,26 +85,27 @@ func makeHandler(c *Context, fn func(http.ResponseWriter, *http.Request, *Contex
 }
 
 func main() {
-	//os.Remove("./foo.db")
+	os.Remove("./foo.db")
 
 	db, err := sql.Open("sqlite3", "./foo.db")
-	defer db.Close()
 	if err != nil {
 		log.Fatal(err)
 	}
+	defer db.Close()
 
 	c := NewContext(db, sessions.NewCookieStore([]byte("something-very-secret")))
 
-	/*_, err = c.db.Exec("create table users(username text primary key, password text, email text)")
+	_, err = c.db.Exec("create table users(username text primary key, password text, email text)")
 	if err != nil {
 		log.Fatal(err)
-	}*/
+	}
 
 	http.HandleFunc("/", makeHandler(c, rootHandler))
 	http.HandleFunc("/register", makeHandler(c, registerHandler))
 	http.HandleFunc("/login", makeHandler(c, loginHandler))
 	http.HandleFunc("/doregister", makeHandler(c, doregisterHandler))
 	http.HandleFunc("/dologin", makeHandler(c, dologinHandler))
+	http.HandleFunc("/dologout", makeHandler(c, dologoutHandler))
 
 	fmt.Println("Serving webserver...")
 	err = http.ListenAndServe(":8080", nil)
@@ -121,10 +128,10 @@ func renderTemplate(w http.ResponseWriter, tmpl string) {
 
 func register(w http.ResponseWriter, r *http.Request, c *Context, u *User) bool {
 	tx, err := c.db.Begin()
-	defer tx.Commit()
 	if err != nil {
 		log.Fatal(err)
 	}
+	defer tx.Commit()
 
 	_, err = tx.Exec("insert into users values(?, ?, ?)", u.username, u.password, u.email)
 	if err != nil {
@@ -137,11 +144,11 @@ func register(w http.ResponseWriter, r *http.Request, c *Context, u *User) bool 
 
 func login(w http.ResponseWriter, r *http.Request, c *Context, user, pass string) bool {
 	rows, err := c.db.Query("select username, password from users where username=?", user)
-	defer rows.Close()
 	if err != nil {
 		log.Fatal(err)
 		return false
 	}
+	defer rows.Close()
 	for rows.Next() {
 		var realUser, realPass string
 		if err := rows.Scan(&realUser, &realPass); err != nil {
@@ -160,8 +167,7 @@ func login(w http.ResponseWriter, r *http.Request, c *Context, user, pass string
 	return false
 }
 
-func logout(w http.ResponseWriter, r *http.Request, c *Context, user string) {
-	session, _ := c.store.Get(r, "gositetest-session")
-	session.Values["user"] = user
-	session.Save(r, w)
+func logout(w http.ResponseWriter) {
+	// gorilla/sessions doesn't let us delete a session D: do it manually
+	http.SetCookie(w, &http.Cookie{Name: "gositetest-session", MaxAge: -1, Path: "/"})
 }
